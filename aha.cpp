@@ -1251,7 +1251,7 @@ int Process(int argc, char *args[], std::string in)
         printf("</html>\n");
     }
 
-    if (fp!=stdin)
+    if (fp && fp != stdin)
         fclose(fp);
     return 0;
 }
