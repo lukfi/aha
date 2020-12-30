@@ -24,6 +24,36 @@
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <cstdarg>
+
+#include "ahashim.h"
+
+namespace { // anonymous namespace
+
+void sformata(std::string &s, const std::string fmt, ...)
+{
+    std::string ss;
+    int n;
+    int size = 100;
+    bool b = false;
+    va_list marker;
+
+    while (!b)
+    {
+        ss.resize(size);
+        va_start(marker, fmt);
+        n = vsnprintf((char*)ss.c_str(), size, fmt.c_str(), marker);
+        va_end(marker);
+        if ((n > 0) && ((b = (n < size)) == true)) {
+            ss.resize(n);
+        } else {
+            size *= 2;
+        }
+    }
+    s += ss;
+}
+
+//#define printf(x, ...) sformata(out, x, __VA_ARGS__)
 
 // table for vt220 character set, see also
 // https://whitefiles.org/b1_s/1_free_guides/fg2cd/pgs/c03b.htm
@@ -82,6 +112,7 @@ struct Options
     char *title;
     int word_wrap;
     int no_xml;
+    bool no_markups;
     char *lang;
     char *css;
     int ignore_cr;
@@ -277,22 +308,23 @@ void make_rgb (int color_id, char str_rgb[12]){
 #define VERSION_PRINTF_MAKRO \
     printf("\033[1;31mAnsi Html Adapter\033[0m Version "AHA_VERSION"\n");
 
-struct Options parseArgs(int argc, char *args[], std::string in = std::string())
+Options parseArgs(int argc, char *args[], std::string in = std::string())
 {
-    struct Options opts = (struct Options){.colorscheme = SCHEME_WHITE,
-                                           .filename = NULL,
-                                           .fp = nullptr,
-                                           .htop_fix = 0,
-                                           .iso = -1,
-                                           .line_break = 0,
-                                           .no_header = 0,
-                                           .stylesheet = 0,
-                                           .title = NULL,
-                                           .word_wrap = 0,
-                                           .no_xml = 0,
-                                           .lang = NULL,
-                                           .ignore_cr = 0,
-                                           .bodystyle = NULL};
+    Options opts = (struct Options){.colorscheme = SCHEME_WHITE,
+                                    .filename = NULL,
+                                    .fp = nullptr,
+                                    .htop_fix = 0,
+                                    .iso = -1,
+                                    .line_break = 0,
+                                    .no_header = 0,
+                                    .stylesheet = 0,
+                                    .title = NULL,
+                                    .word_wrap = 0,
+                                    .no_xml = 0,
+                                    .no_markups = false,
+                                    .lang = NULL,
+                                    .ignore_cr = 0,
+                                    .bodystyle = NULL};
 
     if (!in.empty())
     {
@@ -470,6 +502,11 @@ struct Options parseArgs(int argc, char *args[], std::string in = std::string())
             opts.bodystyle=args[p+1];
             p++;
         }
+        else if (strcmp(args[p],"--no-markups") == 0)
+        {
+            opts.no_markups = true;
+            p++;
+        }
         else
         {
             fprintf(stderr,"Unknown parameter \"%s\"\n",args[p]);
@@ -537,7 +574,12 @@ int statesDiffer(const struct State *const oldState, const struct State *const n
            || (oldState->highlighted != newState->highlighted);
 }
 
-void printHeader(const struct Options *opts)
+#ifndef STANDALONE
+#define VA_ARGS(...) , ##__VA_ARGS__
+#define printf(x, ...) sformata(out, x VA_ARGS(__VA_ARGS__))
+#endif
+
+void printHeader(const struct Options *opts, std::string& out)
 {
     char encoding[16] = "UTF-8";
     if(opts->iso>0) snprintf(encoding, sizeof(encoding), "ISO-8859-%i", opts->iso);
@@ -702,10 +744,12 @@ void printHeader(const struct Options *opts)
     printf("<pre>\n");
 }
 
+}
+
 #ifdef STANDALONE
 int main(int argc,char* args[])
 #else
-int Process(int argc, char *args[], std::string in)
+int AHA::Process(int argc, char *args[], std::string in, std::string& out)
 #endif
 {
     struct Options opts = parseArgs(argc, args, in);
@@ -758,7 +802,7 @@ int Process(int argc, char *args[], std::string in)
     };
 
     if (!opts.no_header)
-        printHeader(&opts);
+        printHeader(&opts, out);
 
     //Begin of Conversion
     struct State state = default_state;
@@ -1051,10 +1095,10 @@ int Process(int argc, char *args[], std::string in)
                 if ( statesDiffer(&state, &oldstate) ) //ANY Change
                 {
                     // If old state was different than the default one, close the current <span>
-                    if (statesDiffer(&oldstate, &default_state))
+                    if (statesDiffer(&oldstate, &default_state) && !opts.no_markups)
                         printf("</span>");
                     // Open new <span> if current state differs from the default one
-                    if (statesDiffer(&state, &default_state))
+                    if (statesDiffer(&state, &default_state) && !opts.no_markups)
                     {
                         if (opts.stylesheet)
                             printf("<span class=\"");
@@ -1240,11 +1284,11 @@ int Process(int argc, char *args[], std::string in)
     }
 
     // If current state is different than the default, there is a <span> open - close it
-    if (statesDiffer(&state, &default_state))
+    if (statesDiffer(&state, &default_state) && !opts.no_markups)
         printf("</span>");
 
     //Footer
-    if (opts.no_header == 0)
+    if (opts.no_header == 0 && !opts.no_markups)
     {
         printf("</pre>\n");
         printf("</body>\n");
